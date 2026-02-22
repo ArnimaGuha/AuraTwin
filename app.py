@@ -266,8 +266,7 @@ elif page == "Patient Risk Explorer":
             help="Risk probability at which a model flags a patient as at-risk"
         )
         years = st.slider("Simulation Years", 5, 15, 10)
-        run_btn = st.button("Run Trajectory", type="primary",
-                            use_container_width=True)
+        
 
     with col_info:
         row = results_df.iloc[patient_idx]
@@ -296,119 +295,7 @@ elif page == "Patient Risk Explorer":
         </div>
         """, unsafe_allow_html=True)
 
-    if run_btn:
-        with st.spinner("Simulating trajectory..."):
-            # Build patient dict from results_df row
-            # We need all clinical features — load from results_df
-            p_row = results_df.iloc[patient_idx]
-            patient_dict = p_row.drop(['PatientIdx', 'ActualDiagnosis',
-                                       'Prob_Traditional', 'Prob_Aura',
-                                       'RiskGap', 'Pred_Traditional',
-                                       'Pred_Aura', 'AuraCatchesMissed',
-                                       'HormoneStage', 'APOE_proxy',
-                                       'APOE_x_HormoneStage',
-                                       'APOE_x_Vascular'],
-                                      errors='ignore').to_dict()
-
-            probs_trad, probs_aura = simulate_trajectory(patient_dict, years)
-            year_range = list(range(years + 1))
-
-            def detect_year(probs, thr):
-                for yr, p in enumerate(probs):
-                    if p >= thr:
-                        return yr
-                return None
-
-            yr_trad = detect_year(probs_trad, threshold)
-            yr_aura = detect_year(probs_aura, threshold)
-
-        # ── Trajectory plot ───────────────────────────────────────
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-        fig.patch.set_facecolor('#0f0f1a')
-        for ax in [ax1, ax2]:
-            ax.set_facecolor('#1a1a2e')
-
-        ax1.plot(year_range, probs_trad, color='#4e9af1', linewidth=2.5,
-                 marker='o', markersize=5,
-                 label='Traditional Model (Male-Normed)')
-        ax1.plot(year_range, probs_aura, color='#f97316', linewidth=2.5,
-                 marker='s', markersize=5,
-                 label='Aura-Twin (Sex-Calibrated)')
-        ax1.axhline(threshold, color='#ef4444', linestyle='--',
-                    linewidth=1.5, alpha=0.8,
-                    label=f'Threshold ({threshold})')
-
-        if yr_trad is not None:
-            ax1.axvline(yr_trad, color='#4e9af1', linestyle=':',
-                        linewidth=1.5, alpha=0.7)
-            ax1.annotate(f'Traditional\nYear {yr_trad}',
-                         xy=(yr_trad, threshold),
-                         xytext=(min(yr_trad + 0.5, years - 1), threshold + 0.12),
-                         color='#4e9af1', fontsize=9, fontweight='bold',
-                         arrowprops=dict(arrowstyle='->', color='#4e9af1'))
-
-        if yr_aura is not None:
-            ax1.axvline(yr_aura, color='#f97316', linestyle=':',
-                        linewidth=1.5, alpha=0.7)
-            ax1.annotate(f'Aura-Twin\nYear {yr_aura}',
-                         xy=(yr_aura, threshold),
-                         xytext=(max(yr_aura - 2.5, 0.2), threshold - 0.18),
-                         color='#f97316', fontsize=9, fontweight='bold',
-                         arrowprops=dict(arrowstyle='->', color='#f97316'))
-
-        if yr_trad and yr_aura and yr_trad != yr_aura:
-            lo, hi = min(yr_trad, yr_aura), max(yr_trad, yr_aura)
-            ax1.axvspan(lo, hi, alpha=0.10, color='white',
-                        label=f'Bias Window: {abs(yr_trad - yr_aura)} yr(s)')
-
-        ax1.set_xlim(0, years)
-        ax1.set_ylim(-0.02, 1.08)
-        ax1.set_xlabel('Years from Baseline', color='white', fontsize=11)
-        ax1.set_ylabel('Predicted Risk Probability', color='white', fontsize=11)
-        ax1.set_title(f'Patient #{patient_idx} — Risk Trajectory',
-                      color='white', fontsize=12, fontweight='bold')
-        ax1.tick_params(colors='white')
-        ax1.spines[['top', 'right']].set_visible(False)
-        for s in ['left', 'bottom']: ax1.spines[s].set_color('#444')
-        ax1.legend(facecolor='#0f0f1a', edgecolor='#444',
-                   labelcolor='white', fontsize=9)
-        ax1.grid(True, alpha=0.12, color='white')
-
-        # Annual gap bars
-        gaps = [pa - pt for pa, pt in zip(probs_aura, probs_trad)]
-        bar_colors = ['#f97316' if g > 0 else '#4e9af1' for g in gaps]
-        ax2.bar(year_range, gaps, color=bar_colors,
-                alpha=0.85, width=0.6, edgecolor='none')
-        ax2.axhline(0, color='white', linewidth=0.8, alpha=0.4)
-        ax2.set_xlabel('Year', color='white', fontsize=11)
-        ax2.set_ylabel('Risk Gap (Aura - Traditional)',
-                       color='white', fontsize=11)
-        ax2.set_title('Annual Bias Magnitude',
-                      color='white', fontsize=12, fontweight='bold')
-        ax2.tick_params(colors='white')
-        ax2.spines[['top', 'right']].set_visible(False)
-        for s in ['left', 'bottom']: ax2.spines[s].set_color('#444')
-        ax2.grid(True, alpha=0.12, color='white', axis='y')
-
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close()
-
-        # ── Detection summary ─────────────────────────────────────
-        if yr_trad is not None and yr_aura is not None:
-            delay = yr_trad - yr_aura
-            if delay > 0:
-                st.error(f"Bias detected — Aura-Twin flags risk {delay} year(s) earlier than Traditional (Year {yr_aura} vs Year {yr_trad})")
-            elif delay == 0:
-                st.success(f"Both models detect risk at Year {yr_trad} — no detection delay for this patient")
-            else:
-                st.info(f"Traditional detects {abs(delay)} year(s) earlier for this patient")
-        elif yr_aura is not None and yr_trad is None:
-            st.error(f"Traditional model never flags this patient — Aura-Twin detects risk at Year {yr_aura}")
-        elif yr_trad is not None and yr_aura is None:
-            st.info(f"Aura-Twin does not flag this patient — Traditional detects at Year {yr_trad}")
-        else:
-            st.warning("Neither model crosses the detection threshold in this simulation window")
+        
 
 
 # ═══════════════════════════════════════════════════════════════════
